@@ -2,6 +2,8 @@ package internal
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -12,10 +14,16 @@ type RedisClient struct {
 }
 
 func NewRedisClient() *RedisClient {
+	redisUrl := os.Getenv("REDIS_URL")
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB, err := strconv.ParseInt(os.Getenv("REDIS_DB"), 10, 64)
+	if err != nil {
+		redisDB = 0
+	}
 	client := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     redisUrl,
+		Password: redisPassword,
+		DB:       int(redisDB),
 	})
 	return &RedisClient{
 		client: client,

@@ -5,11 +5,13 @@ import (
 	"github.com/haserta98/go-rest/internal/handler"
 	"github.com/haserta98/go-rest/internal/repository"
 	"github.com/haserta98/go-rest/internal/service"
+	"github.com/haserta98/go-rest/internal/ws"
 )
 
 func initGroupEndpoints(appCtx *cmd.AppContext) {
 	httpServer := appCtx.GetHTTPServer()
-	groupService := service.NewGroupService(appCtx.GetRepository("Group").(repository.GroupRepository))
+	wsGateway := appCtx.GetService("WsGateway").(*ws.WsGateway)
+	groupService := service.NewGroupService(appCtx.GetRepository("Group").(repository.GroupRepository), wsGateway)
 	groupHandler := handler.NewGroupHandler(groupService)
 
 	httpServer.GetInstance().Post("/groups", groupHandler.CreateGroup)

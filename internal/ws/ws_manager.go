@@ -3,12 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"os"
 	"sync"
 
 	"github.com/bytedance/sonic"
-	"github.com/google/uuid"
 	"github.com/haserta98/go-rest/cmd"
 	"github.com/haserta98/go-rest/internal"
 )
@@ -16,7 +16,7 @@ import (
 type WsShard struct {
 	sync.RWMutex
 	clients map[string]map[string]*WsClient
-	rooms   map[string]map[string]bool
+	rooms   map[string]*WsGroup
 }
 
 type GlobalMessage struct {
@@ -32,21 +32,17 @@ type EventRequest struct {
 type EventHandler func(client *WsClient, payload json.RawMessage)
 
 type GlobalRoomMessage struct {
-	RoomID  string          `json:"room_id"`
-	Payload json.RawMessage `json:"payload"`
+	RoomID        string          `json:"room_id"`
+	SenderID      string          `json:"sender_id,omitempty"`
+	ExcludeSender bool            `json:"exclude_sender"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 const ShardCount = 512
 
 var (
 	ctx    = context.Background()
-	NodeID = func() string {
-		id := os.Getenv("NODE_ID")
-		if id == "" {
-			return "node_" + uuid.New().String()
-		}
-		return "node_" + id
-	}()
+	NodeID = os.Getenv("NODE_ID")
 )
 
 type WsManager struct {
@@ -70,13 +66,39 @@ func NewWsManager(redis *internal.RedisClient, cluster *cmd.Cluster) *WsManager 
 	return manager
 }
 
+func (m *WsManager) Start() {
+	go m.ListenRedis()
+}
+
+func (m *WsManager) JoinGroup(groupID string, client *WsClient) {
+	shard := m.GetShard(client.UserID)
+	shard.Lock()
+	defer shard.Unlock()
+
+	if _, ok := shard.rooms[groupID]; !ok {
+		shard.rooms[groupID] = NewWsGroup(groupID, m)
+		go shard.rooms[groupID].ListenGroupMessages()
+	}
+	shard.rooms[groupID].AddClient(client)
+}
+
+func (m *WsManager) LeaveGroup(groupID string, client *WsClient) {
+	shard := m.GetShard(client.UserID)
+	shard.Lock()
+	defer shard.Unlock()
+
+	if _, ok := shard.rooms[groupID]; ok {
+		shard.rooms[groupID].RemoveClient(client)
+	}
+}
+
 func (m *WsManager) RegisterEventHandler(eventType string, handler EventHandler) {
 	m.handlers[eventType] = handler
 }
 
-func (m *WsManager) GetShard(userID string) *WsShard {
+func (m *WsManager) GetShard(key string) *WsShard {
 	h := fnv.New32a()
-	h.Write([]byte(userID))
+	h.Write([]byte(key))
 	return m.shards[h.Sum32()%ShardCount]
 }
 
@@ -108,35 +130,6 @@ func (m *WsManager) RemoveClient(client *WsClient) {
 	shard.Unlock()
 }
 
-func (m *WsManager) JoinGroup(userID string, groupID string) {
-	m.redis.SAdd("group:users:"+groupID, userID)
-
-	shard := m.GetShard(userID)
-	shard.Lock()
-	defer shard.Unlock()
-
-	if _, ok := shard.rooms[groupID]; !ok {
-		shard.rooms[groupID] = make(map[string]bool)
-	}
-	shard.rooms[groupID][userID] = true
-}
-
-func (m *WsManager) LeaveGroup(userID string, roomID string) {
-	m.redis.SRem("group:users:"+roomID, userID)
-
-	shard := m.GetShard(userID)
-	shard.Lock()
-	defer shard.Unlock()
-
-	if usersInRoom, ok := shard.rooms[roomID]; ok {
-		delete(usersInRoom, userID)
-
-		if len(usersInRoom) == 0 {
-			delete(shard.rooms, roomID)
-		}
-	}
-}
-
 func (m *WsManager) IsLocalUser(userID string) bool {
 	shard := m.GetShard(userID)
 	shard.RLock()
@@ -148,17 +141,32 @@ func (m *WsManager) IsLocalUser(userID string) bool {
 func (m *WsManager) SendSmart(targetUserID string, payload []byte) {
 	if m.IsLocalUser(targetUserID) {
 		m.SendLocalMessageToUser(targetUserID, payload)
+	} else {
+		go m.PublishMessageToUser(targetUserID, payload)
 	}
-	go m.PublishMessageToUser(targetUserID, payload)
 }
 
 func (m *WsManager) SendSmartGroup(groupID string, payload []byte) {
 	broadcastMsg := &GlobalRoomMessage{
-		RoomID:  groupID,
-		Payload: payload,
+		RoomID:        groupID,
+		ExcludeSender: false,
+		Payload:       payload,
 	}
 	msg, _ := sonic.Marshal(broadcastMsg)
-	m.redis.Publish(ctx, "global_room_channel", msg)
+	channel := fmt.Sprintf("global_room_channel:%s", groupID)
+	m.redis.Publish(ctx, channel, msg)
+}
+
+func (m *WsManager) BroadcastToGroup(senderID string, groupID string, payload []byte) {
+	broadcastMsg := &GlobalRoomMessage{
+		RoomID:        groupID,
+		SenderID:      senderID,
+		ExcludeSender: true,
+		Payload:       payload,
+	}
+	msg, _ := sonic.Marshal(broadcastMsg)
+	channel := fmt.Sprintf("global_room_channel:%s", groupID)
+	m.redis.Publish(ctx, channel, msg)
 }
 
 func (m *WsManager) SendLocalMessageToUser(targetUserID string, payload []byte) {
@@ -166,7 +174,11 @@ func (m *WsManager) SendLocalMessageToUser(targetUserID string, payload []byte) 
 	shard.RLock()
 	if clients, exists := shard.clients[targetUserID]; exists {
 		for _, client := range clients {
-			client.Send <- payload
+			select {
+			case client.Send <- payload:
+			default:
+				// Buffer full, drop to prevent deadlock
+			}
 		}
 	}
 	shard.RUnlock()
@@ -203,34 +215,5 @@ func (m *WsManager) ListenRedis() {
 			continue
 		}
 		m.SendLocalMessageToUser(globalMsg.TargetUserID, globalMsg.Payload)
-	}
-}
-
-func (m *WsManager) ListenGroupMessages() {
-	pubsub, err := m.redis.Subscribe(ctx, "global_room_channel")
-	if err != nil {
-		return
-	}
-	for msg := range pubsub {
-		var data GlobalRoomMessage
-		if err := sonic.Unmarshal([]byte(msg.Payload), &data); err != nil {
-			continue
-		}
-
-		for i := 0; i < ShardCount; i++ {
-			shard := m.shards[i]
-
-			shard.RLock()
-			if userIDs, ok := shard.rooms[data.RoomID]; ok {
-				for userID := range userIDs {
-					if devices, ok := shard.clients[userID]; ok {
-						for _, client := range devices {
-							client.Send <- data.Payload
-						}
-					}
-				}
-			}
-			shard.RUnlock()
-		}
 	}
 }

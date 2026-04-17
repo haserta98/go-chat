@@ -8,6 +8,7 @@ type AppContext struct {
 	httpServer   *HTTPServerImpl
 	db           *DB
 	repositories map[string]interface{}
+	services     map[string]interface{}
 }
 
 func NewAppContext(httpServer *HTTPServerImpl, db *DB) *AppContext {
@@ -15,6 +16,7 @@ func NewAppContext(httpServer *HTTPServerImpl, db *DB) *AppContext {
 		httpServer:   httpServer,
 		db:           db,
 		repositories: make(map[string]interface{}),
+		services:     make(map[string]interface{}),
 	}
 }
 
@@ -30,6 +32,24 @@ func (ctx *AppContext) RegisterRepository(name string, repo interface{}) {
 	}
 	log.Printf("Registering repository: %s", name)
 	ctx.repositories[name] = repo
+}
+
+func (ctx *AppContext) RegisterService(name string, service interface{}) {
+	if name == "" {
+		panic("Service name cannot be empty")
+	}
+	if service == nil {
+		panic("Service instance cannot be nil")
+	}
+	if _, exists := ctx.services[name]; exists {
+		panic("Service with this name already exists: " + name)
+	}
+	log.Printf("Registering service: %s", name)
+	ctx.services[name] = service
+}
+
+func (ctx *AppContext) GetService(name string) interface{} {
+	return ctx.services[name]
 }
 
 func (ctx *AppContext) GetRepository(name string) interface{} {

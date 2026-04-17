@@ -26,6 +26,23 @@ func (r *GroupRepository) GetByID(id string) (*models.Group, error) {
 	return &group, nil
 }
 
+func (r *GroupRepository) GetMembers(groupID string) ([]models.User, error) {
+	var members []models.User
+	err := r.db.GetDB().Where("group_id = ?", groupID).Find(&members).Error
+	if err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+func (r *GroupRepository) AddMember(member *models.GroupMember) error {
+	return r.db.GetDB().Create(member).Error
+}
+
+func (r *GroupRepository) RemoveMember(member *models.GroupMember) error {
+	return r.db.GetDB().Delete(member).Error
+}
+
 func (r *GroupRepository) GetAll() ([]models.Group, error) {
 	var groups []models.Group
 	err := r.db.GetDB().Find(&groups).Error

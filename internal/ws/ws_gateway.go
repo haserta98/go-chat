@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/bytedance/sonic"
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -16,36 +15,40 @@ type Echo struct {
 	To  string `json:"to"`
 }
 
+type SendGroupMessage struct {
+	GroupID string          `json:"groupId"`
+	Payload json.RawMessage `json:"payload"`
+}
+
 type WsGateway struct {
-	httpServer *cmd.HTTPServerImpl
-	Manager    *WsManager
+	httpServer   *cmd.HTTPServerImpl
+	Manager      *WsManager
+	onConnect    func(client *WsClient) bool
+	onDisconnect func(client *WsClient)
 }
 
 func NewWsGateway(httpServer *cmd.HTTPServerImpl, manager *WsManager) *WsGateway {
 	return &WsGateway{
-		httpServer: httpServer,
-		Manager:    manager,
+		httpServer:   httpServer,
+		Manager:      manager,
+		onConnect:    nil,
+		onDisconnect: nil,
 	}
 }
 
 func (g *WsGateway) Start() {
 
-	g.Manager.RegisterEventHandler("echo", func(client *WsClient, payload json.RawMessage) {
-		var echo Echo
-		if err := sonic.Unmarshal(payload, &echo); err != nil {
-			log.Printf("Invalid echo payload: %v", err)
-			return
-		}
-		echo.Val++
-		response, _ := sonic.Marshal(echo)
+}
 
-		g.Manager.SendSmart(echo.To, response)
-	})
+func (g *WsGateway) OnConnect(handler func(client *WsClient) bool) {
+	g.onConnect = handler
+}
 
+func (g *WsGateway) OnDisconnect(handler func(client *WsClient)) {
+	g.onDisconnect = handler
 }
 
 func (g *WsGateway) HandleWebSocket() {
-
 	g.httpServer.GetInstance().Use("/ws", func(c fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
@@ -55,6 +58,7 @@ func (g *WsGateway) HandleWebSocket() {
 	})
 
 	g.httpServer.GetInstance().Get("/ws", websocket.New(func(c *websocket.Conn) {
+		log.Printf("hello")
 		userID := c.Query("userID")
 		connID := uuid.New().String()
 		log.Print("New WebSocket connection: userID=", userID, " connID=", connID)
@@ -66,8 +70,22 @@ func (g *WsGateway) HandleWebSocket() {
 
 		client := NewWsClient(connID, userID, c)
 
+		if g.onConnect != nil && !g.onConnect(client) {
+			c.Close()
+			return
+		}
+
 		g.Manager.AddClient(client)
 		go client.WritePump()
+
+		defer func() {
+			g.Manager.RemoveClient(client)
+			c.Close()
+			if g.onDisconnect != nil {
+				g.onDisconnect(client)
+			}
+		}()
+
 		client.ReadPump(g.Manager)
 	}))
 }

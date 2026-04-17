@@ -2,19 +2,20 @@ package cmd
 
 import (
 	"log"
-	"os"
 	"time"
 
 	"github.com/haserta98/go-rest/internal"
 )
 
 type Cluster struct {
-	redis *internal.RedisClient
+	redis  *internal.RedisClient
+	nodeID string
 }
 
-func NewCluster(redis *internal.RedisClient) *Cluster {
+func NewCluster(redis *internal.RedisClient, nodeID string) *Cluster {
 	return &Cluster{
-		redis: redis,
+		redis:  redis,
+		nodeID: nodeID,
 	}
 }
 
@@ -23,12 +24,7 @@ func (c *Cluster) SendHeartbeat() {
 
 	go func() {
 		for range ticker.C {
-
-			nodeID := os.Getenv("NODE_ID")
-			if nodeID == "" {
-				log.Fatal("NODE_ID environment variable is not set")
-			}
-			activeKey := "active_nodes" + nodeID
+			activeKey := "active_nodes:" + c.nodeID
 			if err := c.redis.Set(activeKey, "alive", 10*time.Second); err != nil {
 				log.Printf("Error setting heartbeat in Redis: %v", err)
 			}
@@ -37,7 +33,7 @@ func (c *Cluster) SendHeartbeat() {
 }
 
 func (c *Cluster) IsTargetNodeAlive(nodeID string) (bool, error) {
-	activeKey := "active_nodes" + nodeID
+	activeKey := "active_nodes:" + nodeID
 	val, err := c.redis.Get(activeKey)
 	if err != nil {
 		return false, err

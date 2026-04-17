@@ -9,11 +9,22 @@ import (
 	"github.com/haserta98/go-rest/internal"
 	"github.com/haserta98/go-rest/internal/models"
 	"github.com/haserta98/go-rest/internal/repository"
+	"github.com/haserta98/go-rest/internal/service"
 	"github.com/haserta98/go-rest/internal/ws"
 	"github.com/haserta98/go-rest/routes"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
+
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		log.Fatal("NODE_ID environment variable is not set")
+	}
+
 	httpCH := make(chan *cmd.HTTPServerImpl)
 	dbCH := make(chan *cmd.DB)
 
@@ -24,12 +35,11 @@ func main() {
 	db := <-dbCH
 
 	redisClient := internal.NewRedisClient()
-	cluster := cmd.NewCluster(redisClient)
+	cluster := cmd.NewCluster(redisClient, nodeID)
 	cluster.SendHeartbeat()
 
 	manager := ws.NewWsManager(redisClient, cluster)
-
-	go manager.ListenRedis()
+	manager.Start()
 
 	wsGateway := ws.NewWsGateway(httpServer, manager)
 	wsGateway.HandleWebSocket()
@@ -50,6 +60,13 @@ func main() {
 
 	ctx.RegisterRepository("User", *repository.NewUserRepository(ctx.GetDB()))
 	ctx.RegisterRepository("Group", *repository.NewGroupRepository(ctx.GetDB()))
+	ctx.RegisterRepository("Message", repository.NewMessageRepository(ctx.GetDB()))
+
+	messageService := service.NewMessageService(wsGateway, ctx.GetRepository("Message").(*repository.MessageRepository))
+	messageService.RegisterEventHandlers()
+
+	ctx.RegisterService("MessageService", messageService)
+	ctx.RegisterService("WsGateway", wsGateway)
 
 	routes.InitRoutes(ctx)
 
@@ -58,7 +75,6 @@ func main() {
 	if err := ctx.GetHTTPServer().Listen(); err != nil {
 		log.Fatalf("HTTP server başlatılamadı: %v", err)
 	}
-
 	select {}
 }
 

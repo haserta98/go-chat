@@ -25,7 +25,7 @@ func NewWsClient(id string, userID string, conn *websocket.Conn) *WsClient {
 }
 
 func (c *WsClient) WritePump() {
-	pongWait := 5 * time.Second
+	pongWait := 60 * time.Second
 	pingPeriod := (pongWait * 9) / 10
 
 	ticker := time.NewTicker(pingPeriod)
@@ -47,7 +47,6 @@ func (c *WsClient) WritePump() {
 			}
 		case <-ticker.C:
 			c.Conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
-			log.Printf("Sending ping to userID=%s connID=%s", c.UserID, c.ID)
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -57,7 +56,7 @@ func (c *WsClient) WritePump() {
 
 func (c *WsClient) ReadPump(manager *WsManager) {
 
-	pongWait := 5 * time.Second
+	pongWait := 60 * time.Second
 
 	c.Conn.SetReadLimit(4096)
 	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -67,15 +66,12 @@ func (c *WsClient) ReadPump(manager *WsManager) {
 		return nil
 	})
 
-	defer func() {
-		manager.RemoveClient(c)
-		c.Conn.Close()
-	}()
-
 	for {
 		_, msg, err := c.Conn.ReadMessage()
 		if err != nil {
-			log.Println("Error reading message:", err)
+			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("Unexpected close error: %v", err)
+			}
 			break
 		}
 		if len(msg) == 0 {
