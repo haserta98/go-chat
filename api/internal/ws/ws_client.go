@@ -1,0 +1,102 @@
+package ws
+
+import (
+	"log"
+	"sync"
+	"time"
+
+	"github.com/bytedance/sonic"
+	"github.com/gofiber/contrib/v3/websocket"
+)
+
+type WsClient struct {
+	ID     string
+	UserID string
+	Conn   *websocket.Conn
+	Send   chan *EventRequest
+	once   sync.Once
+}
+
+func NewWsClient(id string, userID string, conn *websocket.Conn) *WsClient {
+	return &WsClient{
+		ID:     id,
+		UserID: userID,
+		Conn:   conn,
+		Send:   make(chan *EventRequest, 256),
+	}
+}
+
+func (c *WsClient) Close() {
+	c.once.Do(func() {
+		close(c.Send)
+	})
+}
+
+func (c *WsClient) WritePump() {
+	pongWait := 60 * time.Second
+	pingPeriod := (pongWait * 9) / 10
+
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
+
+	for {
+		select {
+		case msg, ok := <-c.Send:
+			c.Conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+			if !ok {
+				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			data, _ := sonic.Marshal(msg)
+			if err := c.Conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *WsClient) ReadPump(manager *WsManager) {
+
+	pongWait := 60 * time.Second
+
+	c.Conn.SetReadLimit(4096)
+	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+
+	c.Conn.SetPongHandler(func(string) error {
+		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	for {
+		_, msg, err := c.Conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("Unexpected close error: %v", err)
+			}
+			break
+		}
+		if len(msg) == 0 {
+			continue
+		}
+
+		var request EventRequest
+		if err := sonic.Unmarshal(msg, &request); err != nil {
+			log.Printf("Geçersiz JSON formatı: %v", err)
+			continue
+		}
+
+		if handler, exists := manager.handlers[request.Type]; exists {
+			handler(c, request.Payload)
+		} else {
+			log.Printf("Kayıtlı olmayan event türü: %s", request.Type)
+		}
+	}
+}
