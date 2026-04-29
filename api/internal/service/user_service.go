@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -11,7 +12,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var JWTSecret = []byte("your-secret-key")
+func jwtSecret() []byte {
+	s := os.Getenv("JWT_SECRET")
+	if s == "" {
+		panic("JWT_SECRET environment variable is not set")
+	}
+	return []byte(s)
+}
 
 type UserService interface {
 	CreateUser(name, email, password string) (*models.User, error)
@@ -21,6 +28,8 @@ type UserService interface {
 	UpdateUser(id, name, email string) error
 	DeleteUser(id string) error
 	GetContacts(userID string) ([]models.User, error)
+	AddContact(userID, contactID string) error
+	RemoveContact(userID, contactID string) error
 }
 
 type UserServiceImpl struct {
@@ -66,7 +75,7 @@ func (s *UserServiceImpl) LoginUser(name, password string) (string, *models.User
 		"exp":     time.Now().Add(time.Hour * 24).Unix(),
 	})
 
-	tokenString, err := token.SignedString(JWTSecret)
+	tokenString, err := token.SignedString(jwtSecret())
 	if err != nil {
 		return "", nil, errors.New("token oluşturulamadı")
 	}
@@ -97,6 +106,17 @@ func (s *UserServiceImpl) DeleteUser(id string) error {
 		return errors.New("kullanıcı bulunamadı")
 	}
 	return nil
+}
+
+func (s *UserServiceImpl) AddContact(userID, contactID string) error {
+	if userID == contactID {
+		return errors.New("kendini kişi olarak ekleyemezsin")
+	}
+	return s.repo.AddContact(userID, contactID)
+}
+
+func (s *UserServiceImpl) RemoveContact(userID, contactID string) error {
+	return s.repo.RemoveContact(userID, contactID)
 }
 
 func (s *UserServiceImpl) GetContacts(userID string) ([]models.User, error) {

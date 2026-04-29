@@ -10,11 +10,13 @@ import (
 )
 
 type WsClient struct {
-	ID     string
-	UserID string
-	Conn   *websocket.Conn
-	Send   chan *EventRequest
-	once   sync.Once
+	ID       string
+	UserID   string
+	Conn     *websocket.Conn
+	Send     chan *EventRequest
+	once     sync.Once
+	groupsMu sync.RWMutex
+	groups   map[string]struct{}
 }
 
 func NewWsClient(id string, userID string, conn *websocket.Conn) *WsClient {
@@ -23,7 +25,30 @@ func NewWsClient(id string, userID string, conn *websocket.Conn) *WsClient {
 		UserID: userID,
 		Conn:   conn,
 		Send:   make(chan *EventRequest, 256),
+		groups: make(map[string]struct{}),
 	}
+}
+
+func (c *WsClient) addGroup(groupID string) {
+	c.groupsMu.Lock()
+	c.groups[groupID] = struct{}{}
+	c.groupsMu.Unlock()
+}
+
+func (c *WsClient) removeGroup(groupID string) {
+	c.groupsMu.Lock()
+	delete(c.groups, groupID)
+	c.groupsMu.Unlock()
+}
+
+func (c *WsClient) getGroups() []string {
+	c.groupsMu.RLock()
+	defer c.groupsMu.RUnlock()
+	ids := make([]string, 0, len(c.groups))
+	for id := range c.groups {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func (c *WsClient) Close() {

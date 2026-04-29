@@ -39,8 +39,8 @@ func (r *GroupRepository) AddMember(member *models.GroupMember) error {
 	return r.db.GetDB().Create(member).Error
 }
 
-func (r *GroupRepository) RemoveMember(member *models.GroupMember) error {
-	return r.db.GetDB().Delete(member).Error
+func (r *GroupRepository) RemoveMember(groupID, userID string) error {
+	return r.db.GetDB().Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&models.GroupMember{}).Error
 }
 
 func (r *GroupRepository) GetAll() ([]models.Group, error) {

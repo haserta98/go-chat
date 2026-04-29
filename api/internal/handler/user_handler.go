@@ -173,6 +173,70 @@ func (h *UserHandler) DeleteUser(c fiber.Ctx) error {
 	})
 }
 
+func (h *UserHandler) AddContact(c fiber.Ctx) error {
+	userID := c.Locals("user_id")
+	if userID == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized",
+		})
+	}
+
+	contactDTO := new(models.UserContactDTO)
+	if err := c.Bind().WithAutoHandling().Body(contactDTO); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Geçersiz veri",
+		})
+	}
+	if contactDTO.ContactID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ContactID alanı zorunludur",
+		})
+	}
+
+	err := h.service.AddContact(userID.(string), contactDTO.ContactID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"status": "success",
+	})
+}
+
+func (h *UserHandler) RemoveContact(c fiber.Ctx) error {
+	userID := c.Locals("user_id")
+	if userID == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized",
+		})
+	}
+
+	contactDTO := new(models.UserContactDTO)
+	if err := c.Bind().WithAutoHandling().Body(contactDTO); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Geçersiz veri",
+		})
+	}
+	if contactDTO.ContactID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "ContactID alanı zorunludur",
+		})
+	}
+
+	err := h.service.RemoveContact(userID.(string), contactDTO.ContactID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"status": "success",
+	})
+}
+
 func (h *UserHandler) GetContacts(c fiber.Ctx) error {
 	userID := c.Locals("user_id")
 	if userID == nil {
@@ -214,3 +278,31 @@ func (h *UserHandler) GetMe(c fiber.Ctx) error {
 		"data":   user,
 	})
 }
+
+func (h *UserHandler) GetContactsOnlineStatus(c fiber.Ctx) error {
+	userID := c.Locals("user_id")
+	if userID == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized",
+		})
+	}
+
+	contacts, err := h.service.GetContacts(userID.(string))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Kişiler alınırken hata oluştu",
+		})
+	}
+
+	onlineStatuses := make(map[string]bool)
+	for _, contact := range contacts {
+		isOnline, _ := h.redisClient.Exists("user:online:" + contact.ID)
+		onlineStatuses[contact.ID] = isOnline
+	}
+
+	return c.JSON(fiber.Map{
+		"status": "success",
+		"data":   onlineStatuses,
+	})
+}
+

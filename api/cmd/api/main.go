@@ -56,13 +56,6 @@ func main() {
 	wsGateway.HandleWebSocket()
 	wsGateway.Start()
 
-	if ctx.GetHTTPServer() == nil {
-		log.Fatal("HTTP server instance in context is nil")
-	}
-	if ctx.GetDB() == nil {
-		log.Fatal("DB instance in context is nil")
-	}
-
 	ctx.GetDB().Migrate(&models.User{})
 	ctx.GetDB().Migrate(&models.Group{})
 	ctx.GetDB().Migrate(&models.GroupMember{})
@@ -83,12 +76,10 @@ func main() {
 
 	routes.InitRoutes(ctx)
 
-	log.Println("Http server başlatıldı")
 	log.Println("Application has been started")
 	if err := ctx.GetHTTPServer().Listen(); err != nil {
 		log.Fatalf("HTTP server başlatılamadı: %v", err)
 	}
-	select {}
 }
 
 func initHTTPServer(ch chan *cmd.HTTPServerImpl) {

@@ -90,5 +90,71 @@ export const apiClient = {
       credentials: 'include'
     });
     return res.json();
+  },
+
+  async addContact(contactId: string): Promise<BaseResponse<null>> {
+    const res = await fetch(`${API_BASE}/users/contacts`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ contact_id: contactId }),
+      credentials: 'include'
+    });
+    return res.json();
+  },
+
+  async removeContact(contactId: string): Promise<BaseResponse<null>> {
+    const res = await fetch(`${API_BASE}/users/contacts`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ contact_id: contactId }),
+      credentials: 'include'
+    });
+    return res.json();
+  },
+
+  async fetchContactsOnlineStatus(): Promise<BaseResponse<Record<string, boolean>>> {
+    const res = await fetch(`${API_BASE}/users/contacts/online`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+      credentials: 'include'
+    });
+    return res.json();
+  },
+
+  async createGroup(name: string): Promise<BaseResponse<any>> {
+    const res = await fetch(`${API_BASE}/groups`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ name }),
+      credentials: 'include'
+    });
+    return res.json();
+  },
+
+  async fetchAllGroups(): Promise<BaseResponse<any[]>> {
+    const res = await fetch(`${API_BASE}/groups`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+      credentials: 'include'
+    });
+    return res.json();
+  },
+
+  async joinGroup(groupId: string): Promise<BaseResponse<null>> {
+    const res = await fetch(`${API_BASE}/groups/${groupId}/join`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include'
+    });
+    return res.json();
+  },
+
+  async leaveGroup(groupId: string): Promise<BaseResponse<null>> {
+    const res = await fetch(`${API_BASE}/groups/${groupId}/leave`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include'
+    });
+    return res.json();
   }
 };

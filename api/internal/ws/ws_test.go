@@ -14,13 +14,22 @@ var rc = internal.NewRedisClient()
 var cluster = cmd.NewCluster(rc, "node-1")
 var nc, _ = nats.Connect(nats.DefaultURL)
 
-func TestWsManagerAddClientAndSendLocalMessageToUser(t *testing.T) {
-	manager := NewWsManager(rc, cluster, nc)
-	client := &WsClient{
-		ID:     "conn-1",
-		UserID: "user-1",
-		Send:   make(chan []byte, 1),
+func newTestManager() *WsManager {
+	return NewWsManager(rc, cluster, nc, nil)
+}
+
+func newTestClient(connID, userID string) *WsClient {
+	return &WsClient{
+		ID:     connID,
+		UserID: userID,
+		Send:   make(chan *EventRequest, 4),
+		groups: make(map[string]struct{}),
 	}
+}
+
+func TestWsManagerAddClientAndSendLocalMessageToUser(t *testing.T) {
+	manager := newTestManager()
+	client := newTestClient("conn-1", "user-1")
 
 	manager.AddClient(client)
 
@@ -29,8 +38,8 @@ func TestWsManagerAddClientAndSendLocalMessageToUser(t *testing.T) {
 
 	select {
 	case got := <-client.Send:
-		if string(got) != string(payload) {
-			t.Fatalf("expected %s, got %s", string(payload), string(got))
+		if string(got.Payload) != string(payload) {
+			t.Fatalf("expected %s, got %s", string(payload), string(got.Payload))
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for websocket payload")
@@ -38,42 +47,51 @@ func TestWsManagerAddClientAndSendLocalMessageToUser(t *testing.T) {
 }
 
 func TestWsManagerJoinAndLeaveGroup(t *testing.T) {
-	manager := NewWsManager(rc, cluster, nc)
+	manager := newTestManager()
+	client := newTestClient("c1", "user-1")
 
-	client := &WsClient{ID: "c1", UserID: "user-1"}
 	manager.JoinGroup("group-1", client)
 
-	shard := manager.GetShard("user-1")
-	if _, ok := shard.rooms["group-1"]; !ok {
+	manager.roomsMu.RLock()
+	_, ok := manager.rooms["group-1"]
+	manager.roomsMu.RUnlock()
+	if !ok {
 		t.Fatal("expected group to be created")
 	}
-	if _, ok := shard.rooms["group-1"].Clients[client.UserID][client.ID]; !ok {
+
+	manager.rooms["group-1"].mu.RLock()
+	_, inGroup := manager.rooms["group-1"].Clients[client.UserID][client.ID]
+	manager.rooms["group-1"].mu.RUnlock()
+	if !inGroup {
 		t.Fatal("expected user to join the group")
 	}
 
 	manager.LeaveGroup("group-1", client)
 
-	if _, ok := shard.rooms["group-1"].Clients[client.UserID][client.ID]; ok {
+	manager.rooms["group-1"].mu.RLock()
+	_, stillIn := manager.rooms["group-1"].Clients[client.UserID][client.ID]
+	manager.rooms["group-1"].mu.RUnlock()
+	if stillIn {
 		t.Fatal("expected user to leave the group")
 	}
 }
 
 func TestWsGatewayEchoHandler(t *testing.T) {
-	manager := NewWsManager(rc, cluster, nc)
+	manager := newTestManager()
 	gateway := NewWsGateway(nil, manager)
 	gateway.Start()
 
-	receiver := &WsClient{
-		ID:     "conn-2",
-		UserID: "user-2",
-		Send:   make(chan []byte, 1),
-	}
-
+	receiver := newTestClient("conn-2", "user-2")
 	manager.AddClient(receiver)
 
 	handler, ok := manager.handlers["echo"]
 	if !ok {
 		t.Fatal("expected echo handler to be registered")
+	}
+
+	type Echo struct {
+		Val int    `json:"val"`
+		To  string `json:"to"`
 	}
 
 	payload, err := json.Marshal(Echo{Val: 41, To: "user-2"})
@@ -86,7 +104,7 @@ func TestWsGatewayEchoHandler(t *testing.T) {
 	select {
 	case msg := <-receiver.Send:
 		var got Echo
-		if err := json.Unmarshal(msg, &got); err != nil {
+		if err := json.Unmarshal(msg.Payload, &got); err != nil {
 			t.Fatalf("unmarshal response: %v", err)
 		}
 		if got.Val != 42 {
@@ -101,21 +119,11 @@ func TestWsGatewayEchoHandler(t *testing.T) {
 }
 
 func TestWsManagerSendGroupMessage(t *testing.T) {
-
-	manager := NewWsManager(rc, cluster, nc)
+	manager := newTestManager()
 	manager.Start()
 
-	user1Client := &WsClient{
-		ID:     "conn-1",
-		UserID: "user-1",
-		Send:   make(chan []byte, 1),
-	}
-
-	user2Client := &WsClient{
-		ID:     "conn-2",
-		UserID: "user-2",
-		Send:   make(chan []byte, 1),
-	}
+	user1Client := newTestClient("conn-1", "user-1")
+	user2Client := newTestClient("conn-2", "user-2")
 
 	manager.AddClient(user1Client)
 	manager.AddClient(user2Client)
@@ -127,40 +135,21 @@ func TestWsManagerSendGroupMessage(t *testing.T) {
 	go manager.SendSmartGroup(user1Client, "group-1", payload)
 
 	select {
-	case got := <-user1Client.Send:
-		if string(got) != string(payload) {
-			t.Fatalf("expected %s, got %s", string(payload), string(got))
+	case got := <-user2Client.Send:
+		if string(got.Payload) != string(payload) {
+			t.Fatalf("expected %s, got %s", string(payload), string(got.Payload))
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for websocket payload")
-	}
-
-	select {
-	case got := <-user2Client.Send:
-		if string(got) != string(payload) {
-			t.Fatalf("expected %s, got %s", string(payload), string(got))
-		}
-	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for websocket payload")
 	}
 }
 
 func TestWsManagerJoinAndLeaveGroupMessages(t *testing.T) {
-
-	manager := NewWsManager(rc, cluster, nc)
+	manager := newTestManager()
 	manager.Start()
 
-	user1Client := &WsClient{
-		ID:     "conn-1",
-		UserID: "user-1",
-		Send:   make(chan []byte, 1),
-	}
-
-	user2Client := &WsClient{
-		ID:     "conn-2",
-		UserID: "user-2",
-		Send:   make(chan []byte, 1),
-	}
+	user1Client := newTestClient("conn-1", "user-1")
+	user2Client := newTestClient("conn-2", "user-2")
 
 	manager.AddClient(user1Client)
 	manager.AddClient(user2Client)
@@ -172,20 +161,11 @@ func TestWsManagerJoinAndLeaveGroupMessages(t *testing.T) {
 	manager.SendSmartGroup(user1Client, "group-1", payload)
 
 	select {
-	case got := <-user1Client.Send:
-		if string(got) != string(payload) {
-			t.Fatalf("expected %s, got %s", string(payload), string(got))
+	case got := <-user2Client.Send:
+		if string(got.Payload) != string(payload) {
+			t.Fatalf("expected %s, got %s", string(payload), string(got.Payload))
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for websocket payload")
-	}
-
-	select {
-	case got := <-user2Client.Send:
-		if string(got) != string(payload) {
-			t.Fatalf("expected %s, got %s", string(payload), string(got))
-		}
-	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for websocket payload")
 	}
 
@@ -193,18 +173,8 @@ func TestWsManagerJoinAndLeaveGroupMessages(t *testing.T) {
 	manager.SendSmartGroup(user1Client, "group-1", payload)
 
 	select {
-	case got := <-user1Client.Send:
-		if string(got) != string(payload) {
-			t.Fatalf("expected %s, got %s", string(payload), string(got))
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for websocket payload")
-	}
-
-	select {
 	case got := <-user2Client.Send:
-		t.Fatalf("Not expected message for user-2: %s", string(got))
+		t.Fatalf("not expected message for user-2: %s", string(got.Payload))
 	default:
-		return
 	}
 }

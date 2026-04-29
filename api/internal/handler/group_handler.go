@@ -15,6 +15,13 @@ func NewGroupHandler(service *service.GroupService) *GroupHandler {
 }
 
 func (h *GroupHandler) CreateGroup(c fiber.Ctx) error {
+	userID := c.Locals("user_id")
+	if userID == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized",
+		})
+	}
+
 	createDTO := new(dto.GroupCreateRequest)
 	if err := c.Bind().WithAutoHandling().Body(createDTO); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -26,7 +33,7 @@ func (h *GroupHandler) CreateGroup(c fiber.Ctx) error {
 			"error": "Name alanı zorunludur",
 		})
 	}
-	group, err := h.service.CreateGroup(createDTO.Name)
+	group, err := h.service.CreateGroup(createDTO.Name, userID.(string))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Grup oluşturulurken bir hata oluştu",
@@ -120,3 +127,40 @@ func (h *GroupHandler) GetMyGroups(c fiber.Ctx) error {
 		"data":   groups,
 	})
 }
+
+func (h *GroupHandler) JoinGroup(c fiber.Ctx) error {
+	userID := c.Locals("user_id")
+	if userID == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized",
+		})
+	}
+	groupID := c.Params("id")
+	if err := h.service.AddMember(groupID, userID.(string)); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Gruba katılırken hata oluştu",
+		})
+	}
+	return c.JSON(fiber.Map{
+		"status": "success",
+	})
+}
+
+func (h *GroupHandler) LeaveGroup(c fiber.Ctx) error {
+	userID := c.Locals("user_id")
+	if userID == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Unauthorized",
+		})
+	}
+	groupID := c.Params("id")
+	if err := h.service.RemoveMember(groupID, userID.(string)); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Gruptan çıkarken hata oluştu",
+		})
+	}
+	return c.JSON(fiber.Map{
+		"status": "success",
+	})
+}
+

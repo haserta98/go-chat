@@ -26,11 +26,7 @@ func NewGroupService(repo *repository.GroupRepository, wsGateway *ws.WsGateway) 
 	return &GroupService{repo: repo, wsGateway: wsGateway}
 }
 
-func (s *GroupService) Start() {
-
-}
-
-func (s *GroupService) CreateGroup(name string) (*models.Group, error) {
+func (s *GroupService) CreateGroup(name string, creatorID string) (*models.Group, error) {
 	if name == "" {
 		return nil, errors.New("name alanı zorunludur")
 	}
@@ -38,22 +34,40 @@ func (s *GroupService) CreateGroup(name string) (*models.Group, error) {
 		ID:   uuid.New().String(),
 		Name: name,
 	}
-	return group, s.repo.Create(group)
+	if err := s.repo.Create(group); err != nil {
+		return nil, err
+	}
+	// Auto-add creator as admin
+	_ = s.repo.AddMember(&models.GroupMember{
+		ID:      uuid.New().String(),
+		GroupID: group.ID,
+		UserID:  creatorID,
+		Role:    "admin",
+	})
+	
+	s.wsGateway.Manager.NotifyGroupAction("join", group.ID, creatorID)
+	
+	return group, nil
 }
 
 func (s *GroupService) AddMember(groupID, userID string) error {
-	return s.repo.AddMember(&models.GroupMember{
+	err := s.repo.AddMember(&models.GroupMember{
 		ID:      uuid.New().String(),
 		GroupID: groupID,
 		UserID:  userID,
 	})
+	if err == nil {
+		s.wsGateway.Manager.NotifyGroupAction("join", groupID, userID)
+	}
+	return err
 }
 
 func (s *GroupService) RemoveMember(groupID, userID string) error {
-	return s.repo.RemoveMember(&models.GroupMember{
-		GroupID: groupID,
-		UserID:  userID,
-	})
+	err := s.repo.RemoveMember(groupID, userID)
+	if err == nil {
+		s.wsGateway.Manager.NotifyGroupAction("leave", groupID, userID)
+	}
+	return err
 }
 
 func (s *GroupService) GetGroupByID(id string) (*models.Group, error) {

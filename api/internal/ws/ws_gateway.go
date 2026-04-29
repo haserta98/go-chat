@@ -9,11 +9,6 @@ import (
 	"github.com/haserta98/go-rest/cmd"
 )
 
-type Echo struct {
-	Val int    `json:"val"`
-	To  string `json:"to"`
-}
-
 type SendGroupMessage struct {
 	GroupID string          `json:"groupId"`
 	Payload json.RawMessage `json:"payload"`

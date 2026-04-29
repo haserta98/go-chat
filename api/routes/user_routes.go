@@ -23,8 +23,13 @@ func initUserEndpoints(appCtx *cmd.AppContext) {
 	protected := httpServer.GetInstance().Group("/users", authMiddleware)
 	protected.Get("/me", userHandler.GetMe)
 	protected.Get("/contacts", userHandler.GetContacts)
-	protected.Get("/:id", userHandler.GetUserByID)
+	protected.Get("/contacts/online", userHandler.GetContactsOnlineStatus)
+	protected.Post("/contacts", userHandler.AddContact)
+	protected.Delete("/contacts", userHandler.RemoveContact)
 	protected.Get("/", userHandler.GetAllUsers)
+
+	// Wildcard routes MUST come after static paths
+	protected.Get("/:id", userHandler.GetUserByID)
 	protected.Put("/:id", userHandler.UpdateUser)
 	protected.Delete("/:id", userHandler.DeleteUser)
 }

@@ -27,3 +27,7 @@ type User struct {
 	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
+
+type UserContactDTO struct {
+	ContactID string `json:"contact_id" validate:"required"`
+}

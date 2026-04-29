@@ -53,3 +53,9 @@ func (c *RedisClient) SMembers(key string) ([]string, error) {
 func (c *RedisClient) Del(key string) error {
 	return c.client.Del(context.Background(), key).Err()
 }
+
+func (c *RedisClient) Exists(key string) (bool, error) {
+	val, err := c.client.Exists(context.Background(), key).Result()
+	return val > 0, err
+}
+

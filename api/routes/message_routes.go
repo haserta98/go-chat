@@ -9,7 +9,7 @@ import (
 
 func initMessageEndpoints(appCtx *cmd.AppContext) {
 	httpServer := appCtx.GetHTTPServer()
-	
+
 	// MessageService is already registered in appCtx
 	msgSvc := appCtx.GetService("MessageService").(*service.MessageService)
 	messageHandler := handler.NewMessageHandler(msgSvc)

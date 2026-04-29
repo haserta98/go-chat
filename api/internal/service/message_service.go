@@ -36,29 +36,34 @@ func NewMessageService(wsGateway *ws.WsGateway, messageRepository *repository.Me
 }
 
 func (s *MessageService) RegisterEventHandlers() {
+	s.wsGateway.Manager.RegisterEventHandler("send_message", s.sendMessage)
+	s.wsGateway.Manager.RegisterEventHandler("send_group_message", s.sendGroupMessage)
+}
 
-	s.wsGateway.Manager.RegisterEventHandler("send_message", func(client *ws.WsClient, payload json.RawMessage) {
-		var sendMessage SendMessage
-		if err := sonic.Unmarshal(payload, &sendMessage); err != nil {
-			log.Printf("Invalid send message payload: %v", err)
-			return
-		}
-		go s.wsGateway.Manager.SendSmart(sendMessage.To, payload)
-		go s.PersistMessage(s.BuildMessage(sendMessage, client))
-	})
+func (s *MessageService) sendGroupMessage(client *ws.WsClient, payload json.RawMessage) {
+	var sendGroupMessage SendGroupMessage
+	if err := sonic.Unmarshal(payload, &sendGroupMessage); err != nil {
+		log.Printf("Invalid send group message payload: %v", err)
+		return
+	}
 
-	s.wsGateway.Manager.RegisterEventHandler("send_group_message", func(client *ws.WsClient, payload json.RawMessage) {
-		var sendGroupMessage SendGroupMessage
-		if err := sonic.Unmarshal(payload, &sendGroupMessage); err != nil {
-			log.Printf("Invalid send group message payload: %v", err)
-			return
-		}
+	go s.wsGateway.Manager.SendSmartGroup(client, string(sendGroupMessage.To), payload)
 
-		go s.wsGateway.Manager.SendSmartGroup(client, string(sendGroupMessage.To), payload)
+	message := s.BuildGroupMessage(sendGroupMessage, client)
+	err := s.PersistGroupMessage(message)
+	if err != nil {
+		log.Printf("Failed to persist group message: %v", err)
+	}
+}
 
-		message := s.BuildGroupMessage(sendGroupMessage, client)
-		s.PersistGroupMessage(message)
-	})
+func (s *MessageService) sendMessage(client *ws.WsClient, payload json.RawMessage) {
+	var sendMessage SendMessage
+	if err := sonic.Unmarshal(payload, &sendMessage); err != nil {
+		log.Printf("Invalid send message payload: %v", err)
+		return
+	}
+	go s.wsGateway.Manager.SendSmart(sendMessage.To, payload)
+	go s.PersistMessage(s.BuildMessage(sendMessage, client))
 }
 
 func (s *MessageService) SeenBulk(messageIDs []string) error {
@@ -75,10 +80,12 @@ func (s *MessageService) PersistMessage(message *models.Message) {
 	}
 }
 
-func (s *MessageService) PersistGroupMessage(message *models.GroupMessage) {
+func (s *MessageService) PersistGroupMessage(message *models.GroupMessage) error {
 	if err := s.messageRepository.CreateGroupMessage(message); err != nil {
 		log.Printf("Failed to persist group message: %v", err)
+		return err
 	}
+	return nil
 }
 
 func (s *MessageService) BuildMessage(sendMessage SendMessage, fromUser *ws.WsClient) *models.Message {

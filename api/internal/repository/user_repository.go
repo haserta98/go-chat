@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+
 	"github.com/haserta98/go-rest/cmd"
 	"github.com/haserta98/go-rest/internal/models"
 )
@@ -63,3 +65,30 @@ func (r *UserRepository) GetContacts(userID string) ([]models.User, error) {
 	`, userID).Scan(&users).Error
 	return users, err
 }
+
+func (r *UserRepository) AddContact(userID, contactID string) error {
+	var existing models.UserContact
+	if err := r.db.GetDB().Where("user_id = ? AND contact_id = ?", userID, contactID).First(&existing).Error; err != nil {
+		contact := &models.UserContact{
+			UserID:    userID,
+			ContactID: contactID,
+		}
+		return r.db.GetDB().Create(contact).Error
+	}
+	return errors.New("contact already exists")
+}
+
+func (r *UserRepository) RemoveContact(userID, contactID string) error {
+	return r.db.GetDB().Delete(&models.UserContact{}, "user_id = ? AND contact_id = ?", userID, contactID).Error
+}
+
+// GetContactOwners returns user IDs who have the given contactID in their contacts list.
+// This is a reverse lookup used for presence notifications.
+func (r *UserRepository) GetContactOwners(contactID string) ([]string, error) {
+	var userIDs []string
+	err := r.db.GetDB().Model(&models.UserContact{}).
+		Where("contact_id = ?", contactID).
+		Pluck("user_id", &userIDs).Error
+	return userIDs, err
+}
+

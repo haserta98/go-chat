@@ -1,81 +1,84 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Send, User, Users, MessageSquare } from 'lucide-react';
-import { useChat } from '../context/ChatContext';
+import { useAuthStore } from '../stores/authStore';
+import { useChatStore } from '../stores/chatStore';
+import { Avatar } from './ui/Avatar';
+import { Input } from './ui/Input';
+import { Button } from './ui/Button';
 
 export function ChatArea() {
-  const { activeChat, messages, sendMessage } = useChat();
-  const [inputText, setInputText] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { userId, username } = useAuthStore();
+  const { activeChat, messages, onlineUsers, sendMessage } = useChatStore();
+  const [text, setText] = useState('');
+  const endRef = useRef<HTMLDivElement>(null);
 
-  const activeMessages = activeChat ? messages[activeChat.id] || [] : [];
+  const chatMessages = activeChat ? messages[activeChat.id] || [] : [];
+  const isOnline = activeChat?.type === 'user' && onlineUsers.has(activeChat.id);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activeChat]);
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, activeChat]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-    sendMessage(inputText);
-    setInputText('');
+    if (!text.trim()) return;
+    sendMessage(text, userId, username);
+    setText('');
   };
 
   if (!activeChat) {
     return (
-      <div className="glass main-chat animate-fade-in" style={{ animationDelay: '0.1s' }}>
-        <div className="empty-state">
-          <MessageSquare size={64} opacity={0.2} />
-          <h2>No Chat Selected</h2>
-          <p>Select a user or join a group to start messaging.</p>
-        </div>
+      <div className="glass flex-1 flex flex-col items-center justify-center text-slate-400 gap-4 animate-in">
+        <MessageSquare size={56} className="opacity-20" />
+        <h2 className="text-lg font-semibold text-white">No Chat Selected</h2>
+        <p className="text-sm">Select a user or group to start messaging.</p>
       </div>
     );
   }
 
   return (
-    <div className="glass main-chat animate-fade-in" style={{ animationDelay: '0.1s' }}>
-      <div className="chat-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div className={`avatar ${activeChat.type === 'group' ? 'group-avatar' : ''}`}>
-            {activeChat.type === 'group' ? <Users size={20} color="white" /> : <User size={20} color="white" />}
-          </div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{activeChat.id}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              {activeChat.type === 'group' ? 'Group Chat' : 'Direct Message'}
-            </div>
+    <div className="glass flex-1 flex flex-col overflow-hidden animate-in">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-border flex items-center gap-3">
+        <Avatar
+          name={activeChat.name}
+          variant={activeChat.type === 'group' ? 'group' : 'primary'}
+          online={activeChat.type === 'user' ? isOnline : undefined}
+        >
+          {activeChat.type === 'group' ? <Users size={18} color="white" /> : <User size={18} color="white" />}
+        </Avatar>
+        <div>
+          <div className="font-semibold text-white">{activeChat.name}</div>
+          <div className={`text-xs ${isOnline ? 'text-success' : 'text-slate-400'}`}>
+            {activeChat.type === 'group' ? 'Group Chat' : isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}
           </div>
         </div>
       </div>
 
-      <div className="chat-messages">
-        {activeMessages.map((msg) => (
-          <div key={msg.id} className={`message ${msg.isMine ? 'sent' : 'received'}`}>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
+        {chatMessages.map((msg) => (
+          <div key={msg.id}
+            className={`max-w-[75%] px-4 py-3 rounded-xl leading-relaxed animate-in text-sm
+              ${msg.isMine
+                ? 'self-end bg-msg-sent rounded-br-sm'
+                : 'self-start bg-msg-received rounded-bl-sm'}`}>
             {!msg.isMine && activeChat.type === 'group' && (
-              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)', marginBottom: '4px' }}>
-                {msg.sender}
-              </div>
+              <div className="text-xs font-semibold text-primary mb-1">{msg.sender}</div>
             )}
             <div>{msg.content}</div>
-            <div className="message-meta">
-              <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <div className="text-[10px] opacity-60 mt-1">
+              {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
         ))}
-        <div ref={messagesEndRef} />
+        <div ref={endRef} />
       </div>
 
-      <form className="chat-input-area" onSubmit={handleSend}>
-        <input
-          type="text"
-          className="input"
-          placeholder={`Message ${activeChat.id}...`}
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-        />
-        <button type="submit" className="btn" disabled={!inputText.trim()}>
-          <Send size={18} />
-        </button>
+      {/* Input */}
+      <form onSubmit={handleSend} className="px-5 py-4 border-t border-border flex gap-2.5">
+        <Input placeholder={`${activeChat.name} ile mesajlaş...`} value={text} onChange={(e) => setText(e.target.value)} />
+        <Button disabled={!text.trim()} icon={<Send size={16} />} />
       </form>
     </div>
   );
